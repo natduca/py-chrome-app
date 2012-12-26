@@ -630,7 +630,7 @@ class App(object):
 
   def Run(self, args=None):
     """Launches and runs instance of the application. Returns its exit code."""
-    with _AppInstance(args) as instance:
+    with _AppInstance(self, args) as instance:
       return instance.Run()
 
   @property
