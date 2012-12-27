@@ -317,7 +317,10 @@ class _AppInstance(object):
 
 
     if self._GetAppID() == None:
+      sys.stderr.write("App not installed. Installing...")
+      sys.stderr.flush()
       self._Install(browser)
+      sys.stderr.write("done.\n")
 
     app_id = self._GetAppID()
 
