@@ -13,7 +13,7 @@ unittest_data_dir = os.path.relpath(
     os.path.dirname(__file__),
     'unittest_data'))
 
-class TrackingAppInstance(chromeapp._AppInstance):
+class TrackingAppInstance(chromeapp.AppInstance):
   def __init__(self, *args):
     super(TrackingAppInstance, self).__init__(*args)
     self.did_install = False
@@ -61,7 +61,7 @@ class AppTest(unittest.TestCase):
                        manifest_file,
                        chromeapp_profiles_dir=self._profiles_dir)
     test = self
-    class MyAppInstance(chromeapp._AppInstance):
+    class MyAppInstance(chromeapp.AppInstance):
       def OnUncaughtError(self, error):
         try:
           test.assertEquals(error['error'], 'Uncaught Error: intentional failure')
@@ -77,7 +77,7 @@ class AppTest(unittest.TestCase):
                        manifest_file,
                        chromeapp_profiles_dir=self._profiles_dir)
     test = self
-    class MyAppInstance(chromeapp._AppInstance):
+    class MyAppInstance(chromeapp.AppInstance):
       def OnPrint(self, contents):
         try:
           test.assertEquals(len(contents), 1)
@@ -86,3 +86,24 @@ class AppTest(unittest.TestCase):
           self.ExitRunLoop(0)
     with MyAppInstance(app) as app_instance:
       ret = app_instance.Run()
+
+  def testAppThatSendsEvent(self):
+    manifest_file = os.path.join(unittest_data_dir,
+                                 'app-that-sends-event', 'manifest.json')
+    app = chromeapp.App('app-that-sends-event',
+                        manifest_file,
+                        chromeapp_profiles_dir=self._profiles_dir)
+    got_event = [False]
+    def OnEvent(arg1, arg2):
+      self.assertEquals(arg1, [1, 2, 3])
+      self.assertEquals(arg2, True)
+      got_event[0] = True
+
+    with chromeapp.AppInstance(app) as app_instance:
+      self.assertFalse(app_instance.HasListener('hello-world', OnEvent))
+      app_instance.AddListener('hello-world', OnEvent)
+      self.assertTrue(app_instance.HasListener('hello-world', OnEvent))
+      ret = app_instance.Run()
+      self.assertEquals(0, ret)
+      app_instance.RemoveListener('hello-world', OnEvent)
+    self.assertTrue(got_event[0])

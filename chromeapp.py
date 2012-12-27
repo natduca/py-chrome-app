@@ -274,12 +274,13 @@ def _WaitFor(condition,
                              (timeout, condition_string))
     time.sleep(poll_interval)
 
-class _AppInstance(object):
+class AppInstance(object):
   def __init__(self, app, args=None):
     self._app = app
     self._proc = None
     self._devnull = None
     self._cur_chromeapp_js = None
+    self._event_listeners = {}
     if args:
       self._args = args
     else:
@@ -472,6 +473,15 @@ class _AppInstance(object):
     postAsync('/print', messages);
   }
 
+  function sendEvent(event_name) {
+    var args = [];
+    for (var i = 1; i < arguments.length; i++)
+      args.push(arguments[i]);
+    postAsync('/send_event', {
+        event_name: event_name,
+        args: args});
+  }
+
   var exiting = false;
   function exit(opt_exitCode) {
     var exitCode = opt_exitCode;
@@ -493,6 +503,7 @@ class _AppInstance(object):
 
   window.chromeapp = chromeapp;
   window.chromeapp.launch_args = undefined;
+  window.chromeapp.sendEvent = sendEvent;
   window.chromeapp.print = print;
   window.chromeapp.exit = exit;
 })();
@@ -533,15 +544,42 @@ class _AppInstance(object):
       self._exit_code = None
     return exit_code
 
-  def OnUncaughtError(self, error):
+  def _OnUncaughtError(self, error):
     m = re.match('chrome-extension:\/\/(.+)\/(.*)', error['url'], re.DOTALL)
     assert m
     sys.stderr.write("Uncaught error: %s:%i: %s\n" % (
         m.group(2), error['line_number'],
         error['error']))
 
-  def OnPrint(self, content):
+  def _OnPrint(self, content):
     print "%s" % ' '.join([str(x) for x in content])
+
+  def AddListener(self, event_name, callback):
+    if event_name not in self._event_listeners:
+      self._event_listeners[event_name] = []
+    assert callback not in self._event_listeners[event_name]
+    self._event_listeners[event_name].append(callback)
+
+  def RemoveListener(self, event_name, callback):
+    if event_name not in self._event_listeners:
+      raise Exception("Not found")
+    self._event_listeners[event_name].remove(callback)
+
+  def HasListener(self, event_name, callback):
+    if event_name not in self._event_listeners:
+      return False
+    return callback in self._event_listeners[event_name]
+
+  def _OnSendEvent(self, content):
+    event_name = content["event_name"]
+    args = content["args"]
+    listeners = self._event_listeners.get(event_name, [])
+    for callback in listeners:
+      try:
+        callback(*args)
+      except:
+        import traceback
+        traceback.print_exc()
 
   def _HandleRequest(self, method, path, content):
     parsed_result = urlparse.urlparse(path)
@@ -549,20 +587,24 @@ class _AppInstance(object):
       return self._args
 
     if path == '/uncaught_error':
-      self.OnUncaughtError(content)
+      self._OnUncaughtError(content)
       return
 
     if path == '/print':
-      self.OnPrint(content)
+      self._OnPrint(content)
+      return
+
+    if path == '/send_event':
+      self._OnSendEvent(content)
       return
 
     if path == '/exit':
-      self.ExitRunLoop(content['exitCode'])
+      self._ExitRunLoop(content['exitCode'])
       return True
 
     raise _RequestException(404)
 
-  def ExitRunLoop(self, exit_code):
+  def _ExitRunLoop(self, exit_code):
     """Forces the app out of its run loop."""
     assert self._daemon.is_running
     if self._exiting_run_loop:
@@ -638,8 +680,13 @@ class App(object):
                                      stable_app_name)
 
   def Run(self, args=None):
-    """Launches and runs instance of the application. Returns its exit code."""
-    with _AppInstance(self, args) as instance:
+    """Launches and runs instance of the application. Returns its exit code.
+
+    This is shorthand for creating an AppInstance against this app and running it:
+       with AppInstance(app, args) as instance:
+          ret_val = instance.Run()
+    """
+    with AppInstance(self, args) as instance:
       return instance.Run()
 
   @property
