@@ -482,7 +482,13 @@ class _AppInstance(object):
     if (exiting)
        throw new Error('chromeapp.exit() was a already called');
     exiting = true;
+
     postAsync('/exit', {exitCode: exitCode}, function() { });
+
+    // Busy wait for a bit to try to give the xhr a chance to hit
+    // python.
+    var start = Date.now();
+    while(Date.now() < start + 150);
   }
 
   window.chromeapp = chromeapp;
