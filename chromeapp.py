@@ -274,6 +274,11 @@ def _WaitFor(condition,
                              (timeout, condition_string))
     time.sleep(poll_interval)
 
+def IsChromeInstalled():
+  """Returns whether chromeapp works on this system."""
+  browsers = _FindAllAvailableBrowsers()
+  return len(browsers) > 0
+
 class AppInstance(object):
   def __init__(self, app, args=None):
     self._app = app
