@@ -212,26 +212,29 @@ class _Daemon(BaseHTTPServer.HTTPServer):
 
   def serve_forever(self):
     self._is_running = True
-    while self._is_running:
-      now = time.time()
-      while True:
-        if len(self._pending_timeout_heap):
-          deadline = self._pending_timeout_heap[0].deadline
-          if now > deadline:
-            item = heapq.heappop(self._pending_timeout_heap)
-            item.cb(*item.args)
+    try:
+      while self._is_running:
+        now = time.time()
+        while True:
+          if len(self._pending_timeout_heap):
+            deadline = self._pending_timeout_heap[0].deadline
+            if now > deadline:
+              item = heapq.heappop(self._pending_timeout_heap)
+              item.cb(*item.args)
+            else:
+              next_deadline = deadline
+              break
           else:
-            next_deadline = deadline
+            next_deadline = now + 0.2
             break
-        else:
-          next_deadline = now + 0.2
-          break
 
-      now = time.time()
-      delay = max(0.0,next_deadline - now)
-      r, w, e = select.select([self], [], [], delay)
-      if r:
-        self.handle_request()
+        now = time.time()
+        delay = max(0.0,next_deadline - now)
+        r, w, e = select.select([self], [], [], delay)
+        if r:
+          self.handle_request()
+    finally:
+      self._is_running = False
 
   def HandleRequest(self, method, path, content):
     if self.handler:
