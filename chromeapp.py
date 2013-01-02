@@ -393,40 +393,33 @@ class AppInstance(object):
 (function() {
   var BASE_URL = "__CHROMEAPP_REPLY_URL__"; // Note: chromeapp will set this up during launch
 
-  function getAsync(url, opt_cb) {
-    if (url[0] != '/')
-      throw new Error('Must start with /');
-    var req = new XMLHttpRequest();
-    req.open('GET', BASE_URL + url, true);
-    req.onreadystatechange = function(aEvt) {
-      if (req.readyState == 4) {
-        if (req.status == 200) {
-          if (opt_cb)
-            opt_cb(JSON.parse(req.responseText));
-        } else {
-          console.log('getAsync ' + url, req);
-        }
-      }
-    };
-    req.send(null);
-  }
 
-  function postAsync(url, data, opt_cb) {
-    if (url[0] != '/')
+  function reqAsync(method, path, data, opt_response_cb, opt_err_cb) {
+    if (path[0] != '/')
       throw new Error('Must start with /');
     var req = new XMLHttpRequest();
-    req.open('POST', BASE_URL + url, true);
-    req.onreadystatechange = function(aEvt) {
-      if (req.readyState == 4) {
-        if (req.status == 200) {
-          if (opt_cb)
-            opt_cb(JSON.parese(req.responseText));
-        } else {
-          console.log('getAsync ' + url, req);
-        }
+    req.open(method, BASE_URL + path, true);
+    req.addEventListener('load', function() {
+      if (req.status == 200) {
+        if (opt_response_cb)
+          opt_response_cb(JSON.parse(req.responseText));
+        return;
       }
-    };
-    req.send(JSON.stringify(data));
+      if (opt_err_cb)
+        opt_err_cb();
+      else
+        console.log('reqAsync ' + path, req);
+    });
+    req.addEventListener('error', function() {
+      if (opt_err_cb)
+        opt_err_cb();
+      else
+        console.log('reqAsync ' + path, req);
+    });
+    if (data)
+      req.send(JSON.stringify(data));
+    else
+      req.send(null);
   }
 
   function Event(type, opt_bubbles, opt_preventable) {
@@ -446,7 +439,7 @@ class AppInstance(object):
   var chromeapp = document.createElement('div');
 
   // Ask the server for startup args.
-  getAsync('/launch_args', function(args) {
+  reqAsync('GET', '/launch_args', null, function(args) {
     var e = new Event('launch', false, false);
     e.args = args;
     chromeapp.launch_args = args;
@@ -456,7 +449,7 @@ class AppInstance(object):
   var oldOnError = window.onerror;
   function onUncaughtError(error, url, line_number) {
     console.log(error);
-    postAsync('/uncaught_error', {
+    reqAsync('POST', '/uncaught_error', {
       error: error,
       url: url,
       line_number: line_number});
@@ -475,16 +468,15 @@ class AppInstance(object):
         messages.push('Argument ' + i + ' not convertible to JSON');
       }
     }
-    postAsync('/print', messages);
+    reqAsync('POST', '/print', messages);
   }
 
-  function sendEvent(event_name) {
-    var args = [];
-    for (var i = 1; i < arguments.length; i++)
-      args.push(arguments[i]);
-    postAsync('/send_event', {
+  function sendEvent(event_name, args, opt_callback, opt_err_callback) {
+    reqAsync('POST', '/send_event', {
         event_name: event_name,
-        args: args});
+        args: args},
+        opt_callback,
+        opt_err_callback);
   }
 
   var exiting = false;
@@ -498,7 +490,7 @@ class AppInstance(object):
        throw new Error('chromeapp.exit() was a already called');
     exiting = true;
 
-    postAsync('/exit', {exitCode: exitCode}, function() { });
+    reqAsync('POST', '/exit', {exitCode: exitCode}, function() { });
 
     // Busy wait for a bit to try to give the xhr a chance to hit
     // python.
@@ -560,31 +552,31 @@ class AppInstance(object):
     print "%s" % ' '.join([str(x) for x in content])
 
   def AddListener(self, event_name, callback):
-    if event_name not in self._event_listeners:
-      self._event_listeners[event_name] = []
-    assert callback not in self._event_listeners[event_name]
-    self._event_listeners[event_name].append(callback)
+    if event_name in self._event_listeners:
+      raise Exception('Event listener already registered')
+    self._event_listeners[event_name] = callback
 
   def RemoveListener(self, event_name, callback):
     if event_name not in self._event_listeners:
       raise Exception("Not found")
-    self._event_listeners[event_name].remove(callback)
+    del self._event_listeners[event_name]
 
   def HasListener(self, event_name, callback):
-    if event_name not in self._event_listeners:
-      return False
-    return callback in self._event_listeners[event_name]
+    return event_name in self._event_listeners
 
   def _OnSendEvent(self, content):
     event_name = content["event_name"]
     args = content["args"]
-    listeners = self._event_listeners.get(event_name, [])
-    for callback in listeners:
-      try:
-        callback(*args)
-      except:
-        import traceback
-        traceback.print_exc()
+    listener = self._event_listeners.get(event_name, None)
+    if not listener:
+      raise _RequestException(500)
+
+    try:
+      return listener(args)
+    except:
+      import traceback
+      traceback.print_exc()
+      raise _RequestException(500)
 
   def _HandleRequest(self, method, path, content):
     parsed_result = urlparse.urlparse(path)
@@ -600,16 +592,15 @@ class AppInstance(object):
       return
 
     if path == '/send_event':
-      self._OnSendEvent(content)
-      return
+      return self._OnSendEvent(content)
 
     if path == '/exit':
-      self._ExitRunLoop(content['exitCode'])
+      self.ExitRunLoop(content['exitCode'])
       return True
 
     raise _RequestException(404)
 
-  def _ExitRunLoop(self, exit_code):
+  def ExitRunLoop(self, exit_code):
     """Forces the app out of its run loop."""
     assert self._daemon.is_running
     if self._exiting_run_loop:

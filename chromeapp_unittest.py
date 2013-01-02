@@ -62,7 +62,7 @@ class AppTest(unittest.TestCase):
                        chromeapp_profiles_dir=self._profiles_dir)
     test = self
     class MyAppInstance(chromeapp.AppInstance):
-      def OnUncaughtError(self, error):
+      def _OnUncaughtError(self, error):
         try:
           test.assertEquals(error['error'], 'Uncaught Error: intentional failure')
         finally:
@@ -78,7 +78,7 @@ class AppTest(unittest.TestCase):
                        chromeapp_profiles_dir=self._profiles_dir)
     test = self
     class MyAppInstance(chromeapp.AppInstance):
-      def OnPrint(self, contents):
+      def _OnPrint(self, contents):
         try:
           test.assertEquals(len(contents), 1)
           test.assertEquals(contents[0], 'Hello world')
@@ -94,10 +94,12 @@ class AppTest(unittest.TestCase):
                         manifest_file,
                         chromeapp_profiles_dir=self._profiles_dir)
     got_event = [False]
-    def OnEvent(arg1, arg2):
+    def OnEvent(args):
+      arg1, arg2 = args
       self.assertEquals(arg1, [1, 2, 3])
       self.assertEquals(arg2, True)
       got_event[0] = True
+      return [314, 'hi']
 
     with chromeapp.AppInstance(app) as app_instance:
       self.assertFalse(app_instance.HasListener('hello-world', OnEvent))
