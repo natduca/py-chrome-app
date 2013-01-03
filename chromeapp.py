@@ -14,6 +14,8 @@ import urlparse
 
 import BaseHTTPServer
 
+_unittests_running = False
+
 class ChromeNotFoundException(Exception):
   pass
 
@@ -326,10 +328,12 @@ class AppInstance(object):
 
 
     if self._GetAppID() == None:
-      sys.stderr.write("App not installed. Installing...")
-      sys.stderr.flush()
+      if not _unittests_running:
+        sys.stderr.write("App not installed. Installing...")
+        sys.stderr.flush()
       self._Install(browser)
-      sys.stderr.write("done.\n")
+      if not _unittests_running:
+        sys.stderr.write("done.\n")
 
     app_id = self._GetAppID()
     if self._app.debug_mode:

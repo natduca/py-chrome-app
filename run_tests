@@ -96,7 +96,12 @@ def DiscoverAndRunTests(dir_name, args, top_level_dir):
 
   filtered_suite = FilterSuite(suite, IsTestSelected)
   runner = unittest.TextTestRunner(verbosity = 2)
-  test_result = runner.run(filtered_suite)
+  import chromeapp
+  chromeapp._unittests_running = True
+  try:
+    test_result = runner.run(filtered_suite)
+  finally:
+    chromeapp._unittests_running = False
   return len(test_result.errors) + len(test_result.failures)
 
 def Main(args, start_dir, top_level_dir):
