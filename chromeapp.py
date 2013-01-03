@@ -1,6 +1,7 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import heapq
 import json
 import logging
 import os
@@ -232,6 +233,7 @@ class _Daemon(BaseHTTPServer.HTTPServer):
 
         now = time.time()
         delay = max(0.0,next_deadline - now)
+        delay = min(0.25,delay)
         r, w, e = select.select([self], [], [], delay)
         if r:
           self.handle_request()
@@ -560,8 +562,25 @@ You will see chrome appear as this happens.
       self._devnull = None
       self._proc = subprocess.Popen(browser_args)
 
+  def _StartCheckingForBrowserAliveness(self):
+    self._daemon.AddDelayedTask(self._CheckForBrowserAliveness, 0.25)
+
+  def _CheckForBrowserAliveness(self):
+    if not self._proc:
+      return
+    def IsStopped():
+      return self._proc.poll() != None
+    if IsStopped():
+      if not self._exiting_run_loop:
+        sys.stderr.write("Browser closed without notifying us. Exiting...\n")
+        self.ExitRunLoop(1)
+      return
+    self._StartCheckingForBrowserAliveness()
+
   def Run(self):
     assert self._exit_code == None
+    assert self.is_started
+    self._StartCheckingForBrowserAliveness()
     try:
       self._daemon.Run()
     finally:
@@ -652,12 +671,16 @@ You will see chrome appear as this happens.
         return self._proc.poll() != None
 
       # Try to politely shutdown, first.
-      self._proc.terminate()
-      try:
-        _WaitFor(IsStopped, timeout=5)
-        self._proc = None
-      except _TimeoutException:
-        pass
+      if not IsStopped():
+        try:
+          self._proc.terminate()
+          try:
+            _WaitFor(IsStopped, timeout=5)
+            self._proc = None
+          except _TimeoutException:
+            pass
+        except:
+          pass
 
       # Kill it.
       if not IsStopped():
