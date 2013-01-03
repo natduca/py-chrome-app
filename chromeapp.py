@@ -329,11 +329,17 @@ class AppInstance(object):
 
     if self._GetAppID() == None:
       if not _unittests_running:
-        sys.stderr.write("App not installed. Installing...")
+        sys.stderr.write("""
+Installing Chrome App for %s.
+
+You will see chrome appear as this happens.
+
+***DO NOT CLOSE IT***
+""" % self._app.stable_app_name)
         sys.stderr.flush()
       self._Install(browser)
       if not _unittests_running:
-        sys.stderr.write("done.\n")
+        sys.stderr.write("\nApp installed. Thanks for waiting.\n")
 
     app_id = self._GetAppID()
     if self._app.debug_mode:
