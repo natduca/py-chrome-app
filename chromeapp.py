@@ -28,6 +28,11 @@ class _PossibleDesktopBrowser(object):
   def __repr__(self):
     return '_PossibleDesktopBrowser(browser_type=%s)' % self.browser_type
 
+def _samefile(a, b):
+  if sys.platform != 'win32':
+    return os.path.samefile(a, b)
+  return os.path.abspath(a) == os.path.abspath(b)
+
 def _FindAllAvailableBrowsers():
   """Finds all the desktop browsers available on this machine."""
   browsers = []
@@ -37,11 +42,11 @@ def _FindAllAvailableBrowsers():
       os.getenv('DISPLAY') == None):
     has_display = False
 
-  def AddIfFound(browser_type, type_dir, app_name):
-    app = os.path.join(chrome_root, build_dir, type_dir, app_name)
+  def AddIfFound(browser_type, browser_dir, app_name):
+    app = os.path.join(browser_dir, app_name)
     if os.path.exists(app):
       browsers.append(_PossibleDesktopBrowser(browser_type,
-                                             app))
+                                              app))
       return True
     return False
 
@@ -389,7 +394,7 @@ You will see chrome appear as this happens.
         continue
       if not os.path.exists(app_settings['path']):
         continue
-      if not os.path.samefile(app_settings['path'],
+      if not _samefile(app_settings['path'],
                           self._app.manifest_dirname):
         continue
 
