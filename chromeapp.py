@@ -332,6 +332,8 @@ class AppInstance(object):
       sys.stderr.write("done.\n")
 
     app_id = self._GetAppID()
+    if self._app.debug_mode:
+      print "chromeapp: app_id is %s" % app_id
 
     browser_args = [browser.local_executable]
     browser_args.extend(self._app._GetBrowserStartupArgs())
@@ -394,8 +396,8 @@ class AppInstance(object):
 // py-chrome-ui just before launch, with the necessary
 // parameters for communicating back to the hosting python code.
 (function() {
-  var BASE_URL = "__CHROMEAPP_REPLY_URL__"; // Note: chromeapp will set this up during launch
-
+  var BASE_URL = "__CHROMEAPP_REPLY_URL__"; // Note: chromeapp will set this up during launch.
+  var DEBUG_MODE = __CHROMEAPP_DEBUG_MODE__;  // Note: chromeapp will set this up during launch.lj
 
   function reqAsync(method, path, data, opt_response_cb, opt_err_cb) {
     if (path[0] != '/')
@@ -442,12 +444,24 @@ class AppInstance(object):
   var chromeapp = document.createElement('div');
 
   // Ask the server for startup args.
-  reqAsync('GET', '/launch_args', null, function(args) {
+  // TODO(nduca): crbug.com/168085 causes breakpoints to be ineffective
+  // during the early stages of page load. In debug mode, we delay the launch
+  // event for a bit so that breakpoints work.
+  if (!DEBUG_MODE) {
+    reqAsync('GET', '/launch_args', null, gotLaunchArgs);
+  } else {
+    reqAsync('GET', '/launch_args', null, function(args) {
+      setTimeout(function() {
+         gotLaunchArgs(args);
+      }, 1000);
+    });
+  }
+  function gotLaunchArgs(args) {
     var e = new Event('launch', false, false);
     e.args = args;
     chromeapp.launch_args = args;
     chromeapp.dispatchEvent(e);
-  });
+  }
 
   var oldOnError = window.onerror;
   function onUncaughtError(error, url, line_number) {
@@ -513,8 +527,11 @@ class AppInstance(object):
     self._cur_chromeapp_js = os.path.join(
       self._app.manifest_dirname,
       'chromeapp.js')
-    js = js_template.replace('__CHROMEAPP_REPLY_URL__',
+    js = js_template
+    js = js.replace('__CHROMEAPP_REPLY_URL__',
                              'http://localhost:%i' % self._daemon.port)
+    js = js.replace('__CHROMEAPP_DEBUG_MODE__',
+                             '%s' % json.dumps(self._app.debug_mode))
     with open(self._cur_chromeapp_js, 'w') as f:
       f.write(js)
 
@@ -526,7 +543,7 @@ class AppInstance(object):
     self._cur_chromeapp_js = None
 
   def _Launch(self, browser_args):
-    if not self._app.show_browser_stdout:
+    if not self._app.debug_mode:
       self._devnull = open(os.devnull, 'w')
       self._proc = subprocess.Popen(
         browser_args, stdout=self._devnull, stderr=self._devnull)
@@ -572,6 +589,7 @@ class AppInstance(object):
     args = content["args"]
     listener = self._event_listeners.get(event_name, None)
     if not listener:
+      sys.stderr.write('No listener for %s\n' % event_name)
       raise _RequestException(500)
 
     try:
@@ -653,13 +671,13 @@ class ManifestError(Exception):
 
 class App(object):
   def __init__(self, stable_app_name, manifest_filename,
-               show_browser_stdout=False,
+               debug_mode=False,
                chromeapp_profiles_dir=False):
     self._stable_app_name = stable_app_name
     self._profile_dir = None
 
     self._manifest_filename = manifest_filename
-    self._show_browser_stdout = show_browser_stdout
+    self._debug_mode = debug_mode
 
     with open(self._manifest_filename, 'r') as f:
       manifest_text = f.read()
@@ -693,8 +711,8 @@ class App(object):
     return self._stable_app_name
 
   @property
-  def show_browser_stdout(self):
-    return self._show_browser_stdout
+  def debug_mode(self):
+    return self._debug_mode
 
   @property
   def manifest_filename(self):
