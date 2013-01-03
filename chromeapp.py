@@ -465,7 +465,6 @@ class AppInstance(object):
 
   var oldOnError = window.onerror;
   function onUncaughtError(error, url, line_number) {
-    console.log(error);
     reqAsync('POST', '/uncaught_error', {
       error: error,
       url: url,
