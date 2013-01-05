@@ -255,9 +255,9 @@ class _Daemon(BaseHTTPServer.HTTPServer):
     self._is_running = False
 
   def Run(self):
-    logging.debug('Starting _Daemon on port %d', self._port)
+    logging.debug('Starting chromeapp._Daemon on port %d', self._port)
     self.serve_forever()
-    logging.debug('Shut down _Daemon on port %d', self._port)
+    logging.debug('Shut down chromeapp._Daemon on port %d', self._port)
 
 class _TimeoutException(Exception):
   pass
