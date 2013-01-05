@@ -129,7 +129,7 @@ def Main(args, start_dir, top_level_dir):
   finally:
     os.chdir(olddir)
 
-  return max(num_errors, 255)
+  return min(num_errors, 255)
 
 
 if __name__ == '__main__':
