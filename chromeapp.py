@@ -505,6 +505,8 @@ You will see chrome appear as this happens.
   }
 
   function sendEvent(event_name, args, opt_callback, opt_err_callback) {
+    if (args === undefined)
+      throw new Error('args is required');
     reqAsync('POST', '/send_event', {
         event_name: event_name,
         args: args},
