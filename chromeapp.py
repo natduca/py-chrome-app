@@ -1,6 +1,8 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import base64
+import hashlib
 import heapq
 import json
 import logging
@@ -291,6 +293,48 @@ def IsChromeInstalled():
   browsers = _FindAllAvailableBrowsers()
   return len(browsers) > 0
 
+def _HexToMPDecimal(hex_chars):
+  """ Convert bytes to an MPDecimal string. Example \x00 -> "aa"
+      This gives us the AppID for a chrome extension.
+  """
+  result = ''
+  base = ord('a')
+  for i in xrange(len(hex_chars)):
+    value = ord(hex_chars[i])
+    dig1 = value / 16
+    dig2 = value % 16
+    result += chr(dig1 + base)
+    result += chr(dig2 + base)
+  return result
+
+def _GetPublicKeyFromPath(filepath):
+  # Normalize the path for windows to have capital drive letters.
+  # We intentionally don't check if sys.platform == 'win32' and just
+  # check if this looks like drive letter so that we can test this
+  # even on posix systems.
+  if (len(filepath) >= 2 and
+      filepath[0].islower() and
+      filepath[1] == ':'):
+      return filepath[0].upper() + filepath[1:]
+  return filepath
+
+def _GetPublicKeyUnpacked(filepath):
+  assert os.path.isdir(filepath)
+  f = open(os.path.join(filepath, 'manifest.json'), 'rb')
+  manifest = json.load(f)
+  if 'key' not in manifest:
+    # Use the path as the public key.
+    # See Extension::GenerateIdForPath in extension.cc
+    return _GetPublicKeyFromPath(os.path.abspath(filepath))
+  else:
+    return base64.standard_b64decode(manifest['key'])
+
+def _GetCRXAppID(filepath):
+  pub_key = _GetPublicKeyUnpacked(filepath)
+  pub_key_hash = hashlib.sha256(pub_key).digest()
+  # AppID is the MPDecimal of only the first 128 bits of the hash.
+  return _HexToMPDecimal(pub_key_hash[:128/8])
+
 class AppInstance(object):
   def __init__(self, app, args=None):
     self._app = app
@@ -349,6 +393,12 @@ You will see chrome appear as this happens.
         sys.stderr.write("\nApp installed. Thanks for waiting.\n")
 
     app_id = self._GetAppID()
+
+    # Temporary staging: we now know how to compute crx ids by hand.
+    # Verify that we are getting it right.
+    raw_id = _GetCRXAppID(self._app.manifest_dirname)
+    assert raw_id == app_id
+
     if self._app.debug_mode:
       print "chromeapp: app_id is %s" % app_id
 
