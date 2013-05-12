@@ -191,6 +191,7 @@ class _RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.send_header('Content-Length', 0)
       self.end_headers()
 
+###########################################################################
 class _TimeoutTask(object):
   def __init__(self, cb, deadline, args):
     self.cb = cb
@@ -200,6 +201,67 @@ class _TimeoutTask(object):
   def __cmp__(self, that):
     return cmp(self.deadline, that.deadline)
 
+# crx id computation
+###########################################################################
+def _HexToInt(hex_chars):
+  """ Convert bytes like \xab -> 171 """
+  val = 0
+  for i in xrange(len(hex_chars)):
+    val += pow(256, i) * ord(hex_chars[i])
+  return val
+
+def _HexToMPDecimal(hex_chars):
+  """ Convert bytes to an MPDecimal string. Example \x00 -> "aa"
+      This gives us the AppID for a chrome extension.
+  """
+  result = ''
+  base = ord('a')
+  for i in xrange(len(hex_chars)):
+    value = ord(hex_chars[i])
+    dig1 = value / 16
+    dig2 = value % 16
+    result += chr(dig1 + base)
+    result += chr(dig2 + base)
+  return result
+
+def _GetPublicKeyFromPath(filepath):
+  # Normalize the path for windows to have capital drive letters.
+  # We intentionally don't check if sys.platform == 'win32' and just
+  # check if this looks like drive letter so that we can test this
+  # even on posix systems.
+  if (len(filepath) >= 2 and
+      filepath[0].islower() and
+      filepath[1] == ':'):
+      return filepath[0].upper() + filepath[1:]
+  return filepath
+
+def _GetPublicKeyUnpacked(f, filepath):
+  manifest = json.load(f)
+  if 'key' not in manifest:
+    # Use the path as the public key.
+    # See Extension::GenerateIdForPath in extension.cc
+    return _GetPublicKeyFromPath(filepath)
+  else:
+    return base64.standard_b64decode(manifest['key'])
+
+def _GetPublicKey(filename):
+  pub_key = ''
+  if not os.path.isdir(filename):
+    raise Exception('crx_id for packed extensions not supported');
+
+  # Assume it's an unpacked extension
+  f = open(os.path.join(filename, 'manifest.json'), 'rb')
+  pub_key = _GetPublicKeyUnpacked(f, filename)
+  f.close()
+  return pub_key
+
+def _GetCRXAppID(filename):
+  pub_key = _GetPublicKey(filename)
+  pub_key_hash = hashlib.sha256(pub_key).digest()
+  # AppID is the MPDecimal of only the first 128 bits of the hash.
+  return _HexToMPDecimal(pub_key_hash[:128/8])
+
+###########################################################################
 class _Daemon(BaseHTTPServer.HTTPServer):
   def __init__(self, server_address):
     BaseHTTPServer.HTTPServer.__init__(self, server_address, _RequestHandler)
@@ -377,34 +439,13 @@ class AppInstance(object):
       raise ChromeNotFoundException('Could not find Chrome. Cannot start app.')
     browser = browsers[0]
 
-
-    if self._GetAppID() == None:
-      if not _unittests_running:
-        sys.stderr.write("""
-Installing Chrome App for %s.
-
-You will see chrome appear as this happens.
-
-***DO NOT CLOSE IT***
-""" % self._app.stable_app_name)
-        sys.stderr.flush()
-      self._Install(browser)
-      if not _unittests_running:
-        sys.stderr.write("\nApp installed. Thanks for waiting.\n")
-
-    app_id = self._GetAppID()
-
-    # Temporary staging: we now know how to compute crx ids by hand.
-    # Verify that we are getting it right.
-    raw_id = _GetCRXAppID(self._app.manifest_dirname)
-    assert raw_id == app_id
-
+    app_id = _GetCRXAppID(self._app.manifest_dirname)
     if self._app.debug_mode:
       print "chromeapp: app_id is %s" % app_id
 
     browser_args = [browser.local_executable]
     browser_args.extend(self._app._GetBrowserStartupArgs())
-    browser_args.append('--app-id=%s' % app_id)
+    browser_args.append('--load-and-launch-app=%s' % self._app.manifest_dirname)
     logging.info('Launching %s as %s', self._app.stable_app_name, app_id)
     self._CreateLaunchJS()
     try:
@@ -412,48 +453,6 @@ You will see chrome appear as this happens.
     except:
       if self.is_started:
         self._CloseBrowserProcess()
-
-  def _Install(self, browser):
-    logging.info('Installing %s for first time...', self._app.stable_app_name)
-    browser_args = [browser.local_executable]
-    browser_args.extend(self._app._GetBrowserStartupArgs())
-    browser_args.append(
-      '--load-extension=%s' % self._app.manifest_dirname
-      )
-    try:
-      self._Launch(browser_args)
-      def IsAppInstalled():
-        return self._GetAppID() != None
-      # We may have to a wait for a while, it seems like chrome takes a while
-      # to flush its preferences.
-      _WaitFor(IsAppInstalled, 60, poll_interval=0.5)
-      logging.info('Installed %s', self._app.stable_app_name)
-    finally:
-      if self.is_started:
-        self._CloseBrowserProcess()
-
-  def _GetAppID(self):
-    prefs = self._app._ReadPreferences()
-    if 'extensions' not in prefs:
-      return None
-    if 'settings' not in prefs['extensions']:
-      return None
-    settings = prefs['extensions']['settings']
-    for app_id, app_settings in settings.iteritems():
-      if 'path' not in app_settings:
-        continue
-      if not os.path.exists(app_settings['path']):
-        continue
-      if not _samefile(app_settings['path'],
-                          self._app.manifest_dirname):
-        continue
-
-      if 'events' not in app_settings:
-        return None
-
-      return app_id
-
-    return None
 
   def _CreateLaunchJS(self):
     js_template = """
